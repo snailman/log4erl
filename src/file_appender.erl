@@ -39,17 +39,21 @@ init({Dir, Fname, {Type, Max}, Rot, Suf, Level})->
 %% This one with custom format
 init({Dir, Fname, {Type, Max}, Rot, Suf, Level, Pattern} = _Conf) ->
     ?LOG2("file_appender:init() - 1 ~p~n",[_Conf]),
-    File = Dir ++ "/" ++ Fname ++ "." ++ Suf,
-    {ok, Fd} = file:open(File, ?FILE_OPTIONS),
-    Ltype = #log_type{type = Type, max = Max},
 
-    case Type of
-	time ->
-	    start_file_timer(Max);
-	_ ->
-	    ok
-    end,
-    
+    Ltype = #log_type{type = Type, max = Max},
+    File =  case Type of
+                timehour ->
+                    start_file_timer(Max),
+                    {TimeSuf, _} = make_time_file_name(),
+                    Dir ++ "/" ++ Fname ++ "." ++ TimeSuf ++ "." ++ Suf;
+                time ->
+                    start_file_timer(Max),
+                    Dir ++ "/" ++ Fname ++ "." ++ Suf;
+                _ ->
+                    Dir ++ "/" ++ Fname ++ "." ++ Suf
+            end,
+
+    {ok, Fd} = file:open(File, ?FILE_OPTIONS),
     % Check Rot >= 0
     Rot1 = case Rot < 0 of
 	       true ->
@@ -63,7 +67,7 @@ init({Dir, Fname, {Type, Max}, Rot, Suf, Level, Pattern} = _Conf) ->
     ?LOG2("Adding format of ~p~n",[Format]),
     State = #file_appender{dir = Dir, file_name = Fname, fd = Fd, counter=0,
 			   log_type = Ltype, rotation = Rot1, suffix=Suf,
-			   level=Level, format=Format},
+			   level=Level, param = fetch_now_time_hour(), format=Format},
     ?LOG2("file_appender:init() with conf ~p~n",[State]),
     {ok, State};
 % These 2 are for result of reading conf file
@@ -89,8 +93,7 @@ handle_event({change_level, Level}, State) ->
 handle_event({log,LLog}, State) ->
     ?LOG2("handl_event:log = ~p~n",[LLog]),
     do_log(LLog, State),
-    Res = check_rotation(State),
-    {ok, Res}.
+    check_rotation(State).
 
 handle_call({change_format, Format}, State) ->
     ?LOG2("Old State in file_appender is ~p~n",[State]),
@@ -113,9 +116,14 @@ handle_call(_Request, State) ->
     Reply = ok,
     {ok, Reply, State}.
 
-handle_info(rotate_timer, #file_appender{log_type=#log_type{max=Max}} = State) ->
+handle_info(rotate_timer, #file_appender{log_type=#log_type{type=T, max=Max}} = State) ->
     ?LOG2("rotate_timer msg is received", []),
-    {ok, State2} = rotate(State),
+    {ok, State2} = case T of
+                       timehour ->
+                           check_rotation(State);
+                       _  ->
+                           rotate(State)
+                   end,
     start_file_timer(Max),
     {ok, State2};
 handle_info(_Info, State) ->
@@ -145,13 +153,20 @@ do_log(_Other, _State) ->
     ?LOG2("unknown level ~p~n",[_Other]),
     ok.
 
-rotate(#file_appender{fd = Fd, dir=Dir,  file_name=Fn, counter=Cntr, rotation=Rot, suffix=Suf, log_type=Ltype, level=Level, format=Format} = _S) ->
+rotate(#file_appender{fd = Fd, dir=Dir,  file_name=Fn, rotation=Rot, suffix=Suf, log_type= #log_type{type=T},param = Hour} = _S) ->
     file:close(Fd),
-    ?LOG("Starting rotation~n"),
-    rotate_file(Dir ++ "/" ++ Fn, Rot - 1, Suf),
-    Src = Dir ++ "/" ++ Fn ++ "." ++ Suf,
+    {Src, Param} = case T of
+              timehour ->
+                  {TimeSuf, H} = make_time_file_name(),
+                  {Dir ++ "/" ++ Fn ++ "." ++ TimeSuf ++ "." ++ Suf, H};
+              _  ->
+                  ?LOG("Starting rotation~n"),
+                  rotate_file(Dir ++ "/" ++ Fn, Rot - 1, Suf),
+                  {Dir ++ "/" ++ Fn ++ "." ++ Suf, Hour}
+          end,
+
     {ok ,Fd2} = file:open(Src, ?FILE_OPTIONS_ROTATE),
-    State2 = #file_appender{dir = Dir, file_name = Fn, fd = Fd2, counter=Cntr, log_type = Ltype, rotation = Rot, suffix=Suf, level=Level, format=Format},
+    State2 = _S#file_appender{fd = Fd2, param = Param},
     {ok, State2}.
 
 rotate_file(FileBase, Index, Suffix) when Index > 0 ->
@@ -162,34 +177,62 @@ rotate_file(FileBase, _Index, Suffix) ->
     file:rename(FileBase ++ "." ++ Suffix, FileBase ++ "_1." ++ Suffix).
 
 
+
 % Check if the file needs to be rotated
 % ignore in case of if log type is set to time instead of size	    
 check_rotation(State) ->
-    #file_appender{dir=Dir, file_name=Fname, log_type = #log_type{type=T, max=Max}, suffix=Suf} = State,
+    #file_appender{dir=Dir, file_name=Fname, log_type = #log_type{type=T, max=Max}, suffix=Suf, param = Hour} = State,
     case T of
 	size ->
 	    File = Dir ++ "/" ++ Fname ++  "." ++ Suf,
 	    {ok, Finfo} = file:read_file_info(File),
 	    Size = Finfo#file_info.size,
-	    if
-		Size > Max ->
-		    {ok, State2} = rotate(State),
-		    State2;
-		true ->
-		    State
+	    case Size > Max of
+        true->
+          rotate(State);
+        _ ->
+          {ok,State}
 	    end;
+  timehour ->
+      CurHour = fetch_now_time_hour(),
+      case  CurHour =/= Hour of
+        true ->
+          rotate(State);
+        _ ->
+          {ok,State}
+      end;
+
 	%% time-based rotation is implemented in a seperate process
+
 	_ ->
-	    State
+      {ok,State}
     end.
 
 start_file_timer(Max) ->
     Self = self(),
     ?LOG("starting file timer"),
-    spawn_link(fun() ->
-		       %% time is in seconds
-		       timer:sleep(Max*1000),
-		       Self ! rotate_timer
-	       end),
-    ok.
-		       
+    erlang:send_after(Max, Self, rotate_timer).
+%%    spawn_link(fun() ->
+%%		       %% time is in seconds
+%%		       timer:sleep(Max*1000),
+%%		       Self ! rotate_timer
+%%	       end),
+%%    ok.
+
+
+
+fetch_now_time_hour() ->
+    {_, {Hour,_,_}} = calendar:local_time(),
+    Hour.
+
+make_time_file_name()->
+    D = calendar:local_time(),
+    {{Y, M, Dd},{H,_,_}} = D,
+    [A,B,C,Hh] = lists:map(
+        fun(X) ->
+            integer_to_list(X)
+        end,
+        [Y,M,Dd,H]),
+    Res = A ++ "-" ++ B ++ "-" ++ C  ++ "-" ++ Hh,
+    {Res, H}.
+

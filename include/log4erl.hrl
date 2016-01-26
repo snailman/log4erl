@@ -36,7 +36,7 @@
 %% The filename of a log is file_name ++ "_" ++ counter ++ "." ++ suffix
 %% e.g. log_1.txt
 %% tokens = format tokens generated from log_formatter:parse/1
--record(file_appender, {dir, file_name, fd, counter, log_type, rotation, suffix, level, format=?DEFAULT_FORMAT}).
+-record(file_appender, {dir, file_name, fd, counter, log_type, rotation, suffix, level, param, format=?DEFAULT_FORMAT}).
 
 -record(console_appender, {level=?DEFAULT_LEVEL, format=?DEFAULT_FORMAT}).
 
