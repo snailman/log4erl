@@ -47,6 +47,7 @@ init({Dir, Fname, {Type, Max}, Rot, Suf, Level, Pattern} = _Conf) ->
              {TimeSuf, _} = make_time_file_name(),
              Dir ++ "/" ++ Fname ++ "." ++ TimeSuf ++ "." ++ Suf;
            time ->
+             io:format("start_timer(~p)", [Ltype]),
              start_file_timer(Max),
              Dir ++ "/" ++ Fname ++ "." ++ Suf;
            _ ->
@@ -121,11 +122,16 @@ handle_info(rotate_timer, #file_appender{log_type = #log_type{type = T, max = Ma
   {ok, State2} = case T of
                    timehour ->
                      check_rotation(State);
-                   _ ->
-                     rotate(State)
+                   time ->
+                     rotate(State);
+                   _ -> {ok, State}
                  end,
-  start_file_timer(Max),
+  case T of
+    size -> ok;
+    _  -> start_file_timer(Max)
+  end,
   {ok, State2};
+
 handle_info(_Info, State) ->
   ?LOG2("~w received unknown message: ~p~n", [?MODULE, _Info]),
   {ok, State}.
@@ -209,8 +215,7 @@ check_rotation(State) ->
 
 start_file_timer(Max) ->
   Self = self(),
-  ?LOG("starting file timer"),
-  erlang:send_after(Max, Self, rotate_timer).
+  erlang:send_after(Max*1000, Self, rotate_timer).
 %%    spawn_link(fun() ->
 %%		       %% time is in seconds
 %%		       timer:sleep(Max*1000),

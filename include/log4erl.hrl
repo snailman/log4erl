@@ -22,7 +22,6 @@
 -define(LOG2(_X,_D), ok).
 -endif.
 
-
 %% type = time | size
 %% max = seconds (for time) | or kiloBytes (for size)
 -record(log_type,{type, max}).
