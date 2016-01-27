@@ -235,11 +235,9 @@ fetch_now_time_hour() ->
 make_time_file_name() ->
   D = calendar:local_time(),
   {{Y, M, Dd}, {H, Mm, S}} = D,
-  [A, B, C, Hh,_Mmm, _Ss] = lists:map(
-    fun(X) ->
-      integer_to_list(X)
-    end,
-    [Y, M, Dd, H, Mm, S]),
-  Res = A ++ "-" ++ B ++ "-" ++ C ++ "-" ++ Hh,
+  FormatDate =
+    io_lib:format("~.4w-~.2.0w-~.2.0w-~.2.0w-~.2.0w-~.2.0w",
+      [Y, M, Dd, H, Mm, S]),
+  Res = lists:flatten(FormatDate),
   {Res, H}.
 
