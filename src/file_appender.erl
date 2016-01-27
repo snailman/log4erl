@@ -47,7 +47,6 @@ init({Dir, Fname, {Type, Max}, Rot, Suf, Level, Pattern} = _Conf) ->
              {TimeSuf, _} = make_time_file_name(),
              Dir ++ "/" ++ Fname ++ "." ++ TimeSuf ++ "." ++ Suf;
            time ->
-             io:format("start_timer(~p)", [Ltype]),
              start_file_timer(Max),
              Dir ++ "/" ++ Fname ++ "." ++ Suf;
            _ ->
@@ -128,9 +127,11 @@ handle_info(rotate_timer, #file_appender{log_type = #log_type{type = T, max = Ma
                  end,
   case T of
     size -> ok;
-    _  -> start_file_timer(Max)
+    _  ->
+      start_file_timer(Max)
   end,
   {ok, State2};
+
 
 handle_info(_Info, State) ->
   ?LOG2("~w received unknown message: ~p~n", [?MODULE, _Info]),
@@ -214,8 +215,12 @@ check_rotation(State) ->
   end.
 
 start_file_timer(Max) ->
-  Self = self(),
-  erlang:send_after(Max*1000, Self, rotate_timer).
+  case Max > 0 of
+    true ->
+      Self = self(),
+      erlang:send_after(Max*1000, Self, rotate_timer);
+    _ -> ok
+  end.
 %%    spawn_link(fun() ->
 %%		       %% time is in seconds
 %%		       timer:sleep(Max*1000),
@@ -223,20 +228,18 @@ start_file_timer(Max) ->
 %%	       end),
 %%    ok.
 
-
-
 fetch_now_time_hour() ->
   {_, {Hour, _, _}} = calendar:local_time(),
   Hour.
 
 make_time_file_name() ->
   D = calendar:local_time(),
-  {{Y, M, Dd}, {H, _, _}} = D,
-  [A, B, C, Hh] = lists:map(
+  {{Y, M, Dd}, {H, Mm, S}} = D,
+  [A, B, C, Hh,_Mmm, _Ss] = lists:map(
     fun(X) ->
       integer_to_list(X)
     end,
-    [Y, M, Dd, H]),
+    [Y, M, Dd, H, Mm, S]),
   Res = A ++ "-" ++ B ++ "-" ++ C ++ "-" ++ Hh,
   {Res, H}.
 

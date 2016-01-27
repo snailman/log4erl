@@ -23,7 +23,7 @@
 -endif.
 
 %% type = time | size
-%% max = seconds (for time) | or kiloBytes (for size)
+%% max = seconds (for time) | or kiloBytes (for size)L
 -record(log_type,{type, max}).
 
 %% file_name = the name of the file without counter 
